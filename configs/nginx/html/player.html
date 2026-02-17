@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEX Player (teste)</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    body{font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:0; background:#0b0b0c; color:#eaeaea;}
+    .wrap{display:grid; grid-template-columns: 320px 1fr; height:100vh;}
+    .side{border-right:1px solid #222; padding:16px; overflow:auto;}
+    .side h2{margin:0 0 12px 0; font-size:18px;}
+    .search{width:100%; padding:10px 12px; border-radius:10px; border:1px solid #333; background:#111; color:#eaeaea;}
+    .list{margin:12px 0 0 0; padding:0; list-style:none;}
+    .item{padding:10px 12px; border:1px solid #222; border-radius:10px; margin-bottom:10px; cursor:pointer; background:#111;}
+    .item:hover{background:#151518}
+    .meta{font-size:12px; color:#aaa; margin-top:4px;}
+    .main{display:flex; flex-direction:column;}
+    .top{padding:12px 16px; border-bottom:1px solid #222; display:flex; align-items:center; justify-content:space-between; gap:12px;}
+    .title{font-size:16px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+    .badge{font-size:12px; color:#aaa}
+    .stage{flex:1; display:flex; align-items:center; justify-content:center; padding:16px;}
+    video, iframe{width:100%; height:100%; max-height: calc(100vh - 70px); background:black; border:0; border-radius:14px;}
+    .empty{color:#aaa; text-align:center; max-width:520px; line-height:1.5}
+    .btn{padding:8px 10px;border:1px solid #333;border-radius:10px;background:#111;color:#eaeaea;cursor:pointer}
+    .btn:hover{background:#151518}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="side">
+      <h2>Lista (playlist)</h2>
+      <input id="q" class="search" placeholder="Buscar canal..." />
+      <ul id="list" class="list"></ul>
+      <div class="meta" id="status">Carregando…</div>
+    </aside>
+
+    <main class="main">
+      <div class="top">
+        <div>
+          <div id="now" class="title">Selecione um canal</div>
+          <div id="type" class="badge"></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn" id="reload">Recarregar playlist</button>
+          <a class="btn" href="/" style="text-decoration:none">Início</a>
+        </div>
+      </div>
+      <div class="stage" id="stage">
+        <div class="empty">
+          Abra <code>/playlist.m3u</code> e verifique se existe pelo menos 1 canal.
+          <br>Este player troca automaticamente o motor:
+          <br><b>YouTube</b> → iframe embed • <b>HLS</b> → video + hls.js
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+  const stage = document.getElementById('stage');
+  const listEl = document.getElementById('list');
+  const statusEl = document.getElementById('status');
+  const qEl = document.getElementById('q');
+  const nowEl = document.getElementById('now');
+  const typeEl = document.getElementById('type');
+  const reloadBtn = document.getElementById('reload');
+
+  let channels = [];
+  let hls = null;
+
+  function isYouTube(url){
+    return /youtube\.com|youtu\.be/.test(url);
+  }
+
+  function toYouTubeEmbed(url){
+    // accept: https://www.youtube.com/watch?v=ID, https://youtu.be/ID, https://www.youtube.com/live/ID, or already embed
+    const m1 = url.match(/[?&]v=([^&]+)/);
+    const m2 = url.match(/youtu\.be\/([^?]+)/);
+    const m3 = url.match(/youtube\.com\/live\/([^?]+)/);
+    const m4 = url.match(/youtube\.com\/embed\/([^?]+)/);
+    const id = (m1&&m1[1]) || (m2&&m2[1]) || (m3&&m3[1]) || (m4&&m4[1]);
+    if(!id) return url;
+    return `https://www.youtube.com/embed/${id}?autoplay=1&mute=0&playsinline=1`;
+  }
+
+  function parseM3U(text){
+    const lines = text.split(/\r?\n/);
+    const out = [];
+    let current = null;
+    for(const line of lines){
+      if(line.startsWith('#EXTINF:')){
+        const name = line.split(',').slice(1).join(',').trim();
+        const group = (line.match(/group-title="([^"]+)"/)||[])[1] || '';
+        current = { name, group, url:'' };
+      } else if(line && !line.startsWith('#')){
+        if(current){
+          current.url = line.trim();
+          out.push(current);
+          current = null;
+        }
+      }
+    }
+    return out;
+  }
+
+  function renderList(filter=''){
+    const f = filter.trim().toLowerCase();
+    listEl.innerHTML = '';
+    const filtered = channels.filter(c =>
+      !f || c.name.toLowerCase().includes(f) || (c.group||'').toLowerCase().includes(f)
+    );
+    for(const c of filtered){
+      const li = document.createElement('li');
+      li.className = 'item';
+      li.innerHTML = `<div><b>${escapeHtml(c.name)}</b></div>` +
+        `<div class="meta">${escapeHtml(c.group || 'sem grupo')} • ${isYouTube(c.url) ? 'YouTube' : 'HLS'}</div>`;
+      li.onclick = () => play(c);
+      listEl.appendChild(li);
+    }
+    statusEl.textContent = `${filtered.length} canais (de ${channels.length})`;
+  }
+
+  function escapeHtml(s){
+    return (s||'').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+
+  function destroyPlayer(){
+    if(hls){ try{ hls.destroy(); }catch(e){}; hls = null; }
+    stage.innerHTML = '';
+  }
+
+  function play(c){
+    destroyPlayer();
+    nowEl.textContent = c.name;
+
+    if(isYouTube(c.url)){
+      typeEl.textContent = 'YouTube (iframe)';
+      const iframe = document.createElement('iframe');
+      iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
+      iframe.allowFullscreen = true;
+      iframe.src = toYouTubeEmbed(c.url);
+      stage.appendChild(iframe);
+      return;
+    }
+
+    typeEl.textContent = 'HLS (hls.js)';
+    const video = document.createElement('video');
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+
+    if(video.canPlayType('application/vnd.apple.mpegurl')){
+      // Safari / iOS nativo
+      video.src = c.url;
+      stage.appendChild(video);
+      video.play().catch(()=>{});
+      return;
+    }
+
+    if(window.Hls && window.Hls.isSupported()){
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+      });
+      hls.loadSource(c.url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(()=>{});
+      });
+      stage.appendChild(video);
+      return;
+    }
+
+    stage.innerHTML = `<div class="empty">Seu navegador não suporta HLS. Teste em Chrome/Edge/Firefox com hls.js.</div>`;
+  }
+
+  async function loadPlaylist(){
+    statusEl.textContent = 'Carregando…';
+    try{
+      const res = await fetch('/playlist.m3u', { cache: 'no-store' });
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      channels = parseM3U(text);
+      renderList(qEl.value);
+    } catch (e){
+      statusEl.textContent = `Erro ao carregar playlist: ${e.message}`;
+    }
+  }
+
+  qEl.addEventListener('input', () => renderList(qEl.value));
+  reloadBtn.addEventListener('click', loadPlaylist);
+
+  loadPlaylist();
+</script>
+</body>
+</html>

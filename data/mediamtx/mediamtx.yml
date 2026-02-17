@@ -1,0 +1,18 @@
+logLevel: info
+
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+# Disable low-latency parts to reduce iOS warnings when upstream keyframes vary.
+hlsVariant: mpegts
+hlsSegmentDuration: 2s
+hlsPartDuration: 0s
+hlsSegmentCount: 8
+hlsAllowOrigin: "*"
+
+# Allow any path to be published (agent will publish to /<channel_id>)
+paths:
+  all:
+    source: publisher

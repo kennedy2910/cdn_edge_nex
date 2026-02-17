@@ -1,0 +1,16 @@
+logLevel: info
+
+rtmp: yes
+hls: yes
+
+# Where MediaMTX writes HLS segments/parts
+hlsDirectory: /tmp/hls
+
+# Low-latency HLS (LL-HLS)
+hlsVariant: lowLatency
+hlsSegmentDuration: 2s
+hlsPartDuration: 200ms
+
+paths:
+  all:
+    source: publisher

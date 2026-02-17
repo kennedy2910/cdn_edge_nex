@@ -1,0 +1,50 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    ports:
+      - "${RTMP_PORT:-1935}:1935"
+      - "8888:8888"
+    volumes:
+      - ./data/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - ./data/hls:/tmp/hls
+    command: ["/mediamtx.yml"]
+    networks: [edge]
+
+  edge-agent:
+    build:
+      context: ./edge-agent
+    container_name: edge-agent
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      RTMP_PUBLISH_BASE: "rtmp://mediamtx:1935"
+      EDGE_PUBLIC_HOST: "${EDGE_PUBLIC_HOST:-}"
+      YTDLP_FORMAT: "${YTDLP_FORMAT:-best}"
+      SYNC_INTERVAL: "${SYNC_INTERVAL:-30}"
+    depends_on:
+      - mediamtx
+    ports:
+      - "${EDGE_AGENT_PORT:-9100}:9100"
+    networks: [edge]
+
+  edge-nginx:
+    image: nginx:alpine
+    container_name: edge-nginx
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+      - edge-agent
+    ports:
+      - "${EDGE_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./data/nginx-cache:/var/cache/nginx
+      - ./configs/nginx/html:/usr/share/nginx/html:ro
+    networks: [edge]
+
+networks:
+  edge:
+    name: edge
