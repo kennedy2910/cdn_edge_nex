@@ -39,7 +39,8 @@ app = FastAPI(title="Edge Agent", version="10.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   # depois podemos restringir
-    allow_credentials=True,
+    # Com wildcard em origins, credentials deve ficar false para CORS válido.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
