@@ -1,7 +1,7 @@
 #!/bin/bash
 
-SMART_DNS="http://192.168.11.250:9300/api/edges/heartbeat"
-TOKEN="change-me"
+SMART_DNS="http://103.45.245.58:9300/:9300/api/edges/heartbeat"
+TOKEN="edge_4d300a683c33db32"
 
 EDGE_ID=$(hostname)
 

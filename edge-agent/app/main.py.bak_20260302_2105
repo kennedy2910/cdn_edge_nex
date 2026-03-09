@@ -2,10 +2,7 @@ import os
 import time
 import threading
 import subprocess
-import json
-import shutil
 from typing import Dict, List, Optional, Any
-from urllib.parse import urlparse
 import requests
 from fastapi import FastAPI, Response, Request
 from pydantic import BaseModel
@@ -22,17 +19,12 @@ HLS_PORT = os.getenv("HLS_PORT", "8080")
 PROXY_YOUTUBE = os.getenv("PROXY_YOUTUBE", "1").lower() in ("1", "true", "yes")
 
 CENTRAL_CHANNELS_URL = f"{CENTRAL_BASE_URL}/api/edge/channels"
-CENTRAL_LIVE_EVENTS_URL = f"{CENTRAL_BASE_URL}/api/edge/live-events"
-LIVE_EVENT_CHECK_INTERVAL = max(5, int(os.getenv("LIVE_EVENT_CHECK_INTERVAL", "5")))
 
 LOG_DIR = os.getenv("LOG_DIR", "/data/logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 class Channel(BaseModel):
     id: str
-    channel_pk: Optional[int] = None
-    channel_number: Optional[str] = None
-    provider_id: Optional[str] = None
     name: str
     category: Optional[str] = None
     source_url: str
@@ -43,7 +35,6 @@ class Channel(BaseModel):
     schedule: Optional[Any] = None
     schedule_start: Optional[str] = None  # ISO 8601
     items: Optional[Any] = None  # for youtube_linear (Central payload)
-    now: Optional[Dict[str, Any]] = None
     banner_ads: Optional[List[Dict[str, Any]]] = None
 
 app = FastAPI(title="Edge Agent", version="10.1.0")
@@ -63,11 +54,6 @@ last_channels: Dict[str, Channel] = {}
 last_sync_ts: float = 0.0
 last_error: Optional[str] = None
 resolved_cache: Dict[str, str] = {}
-_last_live_event_check_ts: float = 0.0
-_dead_live_notified: Dict[str, float] = {}
-YTDLP_PATH = shutil.which("yt-dlp")
-YTDLP_AVAILABLE = bool(YTDLP_PATH)
-YTDLP_BIN = YTDLP_PATH or "yt-dlp"
 
 
 def normalize_banner_ads(raw: Any) -> List[Dict[str, Any]]:
@@ -136,13 +122,9 @@ def normalize_channel(it: dict) -> Optional[Channel]:
 
     return Channel(
         id=str(cid).strip(),
-        channel_pk=int(it.get("channel_pk") or it.get("id") or 0) or None,
-        channel_number=str(it.get("channel_number") or cid).strip(),
-        provider_id=str(it.get("provider_id") or "").strip() or None,
         name=str(it.get("name", cid)).strip(),
         category=(str(it.get("category") or "").strip() or None),
         source_url=str(source or "").strip(),
-        playback_url=str(it.get("playback_url") or source or "").strip() or None,
         icon_url=(
             str(
                 it.get("icon_url")
@@ -159,7 +141,6 @@ def normalize_channel(it: dict) -> Optional[Channel]:
             or None
         ),
         items=it.get("items"),
-        now=it.get("now") if isinstance(it.get("now"), dict) else None,
         banner_ads=normalize_banner_ads(it.get("banner_ads") or it.get("bannerAds")),
     )
 
@@ -193,104 +174,6 @@ def get_hls_url(channel_id: str, request: Optional[Request] = None) -> str:
     base = get_hls_base(request)
     return f"{base}/hls/{EDGE_ID}/{channel_id}/index.m3u8"
 
-
-def is_self_hls_url(url: str) -> bool:
-    raw = str(url or "").strip()
-    if not raw:
-        return False
-    try:
-        parsed = urlparse(raw)
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    if not parsed.path.startswith("/hls/"):
-        return False
-
-    host = (parsed.hostname or "").strip().lower()
-    allowed_hosts = {"127.0.0.1", "localhost"}
-    if EDGE_PUBLIC_HOST:
-        allowed_hosts.add(EDGE_PUBLIC_HOST.strip().lower())
-    if CENTRAL_BASE_URL:
-        central_host = (urlparse(CENTRAL_BASE_URL).hostname or "").strip().lower()
-        if central_host:
-            allowed_hosts.add(central_host)
-    return host in allowed_hosts
-
-
-def uses_direct_ingest(channel: Channel) -> bool:
-    if str(channel.kind or "").lower() != "hls":
-        return False
-    source = (channel.source_url or "").strip()
-    playback = (channel.playback_url or "").strip()
-    if not source:
-        return True
-    return is_self_hls_url(source) or is_self_hls_url(playback)
-
-
-def direct_ingest_candidates(channel: Channel, request: Optional[Request] = None) -> List[str]:
-    candidates: List[str] = []
-    seen = set()
-
-    def add(url: Optional[str]) -> None:
-        raw = str(url or "").strip()
-        if not raw or raw in seen:
-            return
-        seen.add(raw)
-        candidates.append(raw)
-
-    playback = (channel.playback_url or "").strip()
-    source = (channel.source_url or "").strip()
-    add(playback)
-    add(source)
-
-    base = get_hls_base(request)
-    stream_id = (channel.id or channel.channel_number or "").strip()
-    stream_name = (channel.name or "").strip().strip('/')
-    provider = (channel.provider_id or "").strip().strip('/')
-
-    if stream_name and stream_id:
-        add(f"{base}/hls/{stream_name}/{stream_id}/index.m3u8")
-    if provider and stream_id:
-        add(f"{base}/hls/{provider}/{stream_id}/index.m3u8")
-    if stream_id:
-        add(f"{base}/hls/{stream_id}/index.m3u8")
-    if stream_name:
-        add(f"{base}/hls/{stream_name}/index.m3u8")
-
-    return candidates
-
-
-def _is_valid_hls_manifest(url: str) -> bool:
-    try:
-        r = requests.get(url, timeout=1.5, allow_redirects=True)
-    except Exception:
-        return False
-    if r.status_code >= 400:
-        return False
-    body = (r.text or "").lstrip()
-    return body.startswith('#EXTM3U')
-
-
-def direct_ingest_url(channel: Channel, request: Optional[Request] = None) -> Optional[str]:
-    candidates = direct_ingest_candidates(channel, request)
-    for candidate in candidates:
-        if _is_valid_hls_manifest(candidate):
-            return candidate
-
-    stream_id = (channel.id or channel.channel_number or "").strip()
-    stream_name = (channel.name or "").strip().strip('/')
-    playback = (channel.playback_url or "").strip()
-    parsed = None
-    try:
-        parsed = urlparse(playback) if playback else None
-    except Exception:
-        parsed = None
-
-    if parsed and parsed.path.startswith('/hls/') and stream_name and stream_id:
-        return f"{get_hls_base(request)}/hls/{stream_name}/{stream_id}/index.m3u8"
-    return candidates[0] if candidates else None
-
 def resolve_youtube(url: str) -> str:
     cmd = ["yt-dlp", "-f", YTDLP_FORMAT, "-g", url]
     out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True, timeout=30)
@@ -298,122 +181,6 @@ def resolve_youtube(url: str) -> str:
     if not line:
         raise RuntimeError("yt-dlp returned empty URL")
     return line
-
-
-def _to_int(v: Any, default: int = 0) -> int:
-    try:
-        return int(v)
-    except Exception:
-        return int(default)
-
-
-def is_trackable_live_item(item: Dict[str, Any]) -> bool:
-    if not isinstance(item, dict):
-        return False
-    if str(item.get("type") or "").strip().lower() != "video":
-        return False
-    if _to_int(item.get("is_live"), 0) != 1:
-        return False
-    if _to_int(item.get("auto_remove_on_end"), 0) != 1:
-        return False
-    return bool(str(item.get("url") or "").strip())
-
-
-def youtube_item_is_live(url: str) -> Optional[bool]:
-    if not url or not is_youtube(url):
-        return None
-    if not YTDLP_AVAILABLE:
-        return None
-    cmd = [
-        YTDLP_BIN,
-        "--no-warnings",
-        "--skip-download",
-        "--dump-single-json",
-        url,
-    ]
-    try:
-        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True, timeout=20)
-        info = json.loads(out.strip() or "{}")
-    except Exception:
-        return None
-
-    status = str(info.get("live_status") or "").strip().lower()
-    return bool(info.get("is_live")) or status == "is_live"
-
-
-def generic_live_url_is_reachable(url: str) -> Optional[bool]:
-    if not url:
-        return None
-    try:
-        r = requests.get(url, timeout=5, allow_redirects=True)
-        if r.status_code >= 400:
-            return False
-        body = (r.text or "").strip()
-        if not body:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def notify_central_live_ended(channel: Channel, item: Dict[str, Any], reason: str = "edge_probe_ended") -> bool:
-    if not CENTRAL_BASE_URL or not API_KEY or not channel.channel_pk:
-        return False
-    url = str(item.get("url") or "").strip()
-    if not url:
-        return False
-    payload = {
-        "event": "live_ended",
-        "action": "ended",
-        "channel_pk": int(channel.channel_pk),
-        "item_id": _to_int(item.get("id"), 0) or None,
-        "url": url,
-        "source": str(item.get("live_source") or "edge").strip() or "edge",
-        "reason": reason,
-    }
-    headers = {
-        "X-API-KEY": API_KEY,
-        "X-EDGE-ID": EDGE_ID,
-    }
-    try:
-        r = requests.post(CENTRAL_LIVE_EVENTS_URL, headers=headers, json=payload, timeout=8)
-        return 200 <= r.status_code < 300
-    except Exception:
-        return False
-
-
-def probe_live_items_once() -> None:
-    if not last_channels:
-        return
-    now = time.time()
-    # expire cache keys periodically
-    for k, ts in list(_dead_live_notified.items()):
-        if (now - ts) > 600:
-            _dead_live_notified.pop(k, None)
-
-    for ch in list(last_channels.values()):
-        if str(ch.kind or "").lower() != "youtube_linear":
-            continue
-        if not isinstance(ch.items, list) or not ch.items:
-            continue
-
-        for item in ch.items:
-            if not is_trackable_live_item(item):
-                continue
-            item_url = str(item.get("url") or "").strip()
-            key = f"{ch.id}:{item.get('id')}:{item_url}"
-            if key in _dead_live_notified:
-                continue
-            if is_youtube(item_url):
-                live_state = youtube_item_is_live(item_url)
-            else:
-                live_state = generic_live_url_is_reachable(item_url)
-            if live_state is None:
-                continue
-            if live_state:
-                continue
-            if notify_central_live_ended(ch, item):
-                _dead_live_notified[key] = now
 
 def build_ffmpeg_cmd(channel_id: str, source_url: str):
     # Namespaced publish path so the generated HLS directory becomes:
@@ -477,10 +244,6 @@ def start_channel(channel: Channel):
     # Requirement: YouTube should be executed directly (bypass), not transcoded to HLS.
     if channel.kind in ("youtube", "youtube_linear") or is_youtube(channel.source_url):
         return
-    if uses_direct_ingest(channel):
-        stop_channel(channel.id)
-        print(f"[EDGE] Skipping local transcode for direct-ingest channel {channel.id}: {direct_ingest_url(channel) or '-'}")
-        return
     if channel.id in procs and procs[channel.id].poll() is None:
         return
     source_url = channel.source_url
@@ -539,9 +302,6 @@ def parse_central_payload(payload: dict) -> Dict[str, Channel]:
                 str(it.get("schedule_start") or it.get("scheduleStart") or (it.get("schedule") or {}).get("start") or "").strip()
                 or ch.schedule_start
             )
-            ch.channel_number = str(it.get("channel_number") or ch.channel_number or ch.id).strip()
-            ch.provider_id = str(it.get("provider_id") or ch.provider_id or "").strip() or ch.provider_id
-            ch.now = it.get("now") if isinstance(it.get("now"), dict) else None
 
             channels[ch.id] = ch
 
@@ -586,102 +346,42 @@ def sync_once():
     except Exception as e:
         last_error = str(e)
 
-def is_live_playlist_item(item: Any) -> bool:
-    if not isinstance(item, dict):
-        return False
-    return str(item.get("is_live") or "0").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _first_item_url(items: Any, include_live: bool = True) -> Optional[str]:
+def _first_item_url(items: Any) -> Optional[str]:
     if not isinstance(items, list) or not items:
         return None
-    for raw_item in items:
-        if not isinstance(raw_item, dict):
-            continue
-        if str(raw_item.get("type") or "video").strip().lower() != "video":
-            continue
-        if not include_live and is_live_playlist_item(raw_item):
-            continue
-        u = str(raw_item.get("url") or "").strip()
-        if u:
-            return u
-    return None
+    u = (items[0] or {}).get("url")
+    return str(u).strip() if u else None
 
-def youtube_bypass_url(ch: Channel, include_live: bool = True) -> Optional[str]:
-    if not include_live and str(ch.kind or "").lower() == "youtube_linear":
-        return _first_item_url(ch.items, include_live=False)
+def youtube_bypass_url(ch: Channel) -> Optional[str]:
     u = (ch.source_url or "").strip() or (ch.playback_url or "").strip()
     if u:
         return u
-    return _first_item_url(ch.items, include_live=include_live)
-
-
-def app_channel_id(ch: Channel) -> str:
-    return str(ch.channel_number or ch.id).strip()
-
-
-def normalize_duration(raw: Any, fallback: int) -> int:
-    try:
-        value = int(raw)
-    except Exception:
-        value = fallback
-    if value <= 0:
-        value = fallback
-    return value
-
-
-def central_now_url(ch: Channel) -> Optional[str]:
-    if not isinstance(ch.now, dict):
-        return None
-    val = str(ch.now.get("url") or "").strip()
-    return val or None
+    return _first_item_url(ch.items)
 
 def to_app_item(ch: Channel, request: Request) -> Optional[dict]:
     """Return an item in the exact shape expected by lineartv-pro App.tsx."""
     # For HLS/live: keep offset at 0 by using a far-future schedule_start.
     schedule_start = ch.schedule_start or ("2099-01-01T00:00:00Z" if ch.kind == "hls" else "2024-01-01T00:00:00Z")
-    now_url = central_now_url(ch)
 
     if ch.kind == "youtube_linear":
-        # If central resolves a current item (live override), publish it directly.
-        if now_url:
-            now_duration = normalize_duration((ch.now or {}).get("duration"), 3600)
-            return {
-                "channel_id": app_channel_id(ch),
-                "name": ch.name,
-                "category": ch.category or "",
-                "kind": "youtube",
-                "schedule_start": schedule_start,
-                "items": [{"type": "video", "url": now_url, "duration": now_duration}],
-                "banner_ads": ch.banner_ads or [],
-                "icon_url": ch.icon_url or "",
-                "icon": ch.icon_url or "",
-                "logo": ch.icon_url or "",
-                "loop": True,
-            }
-
         items = ch.items if isinstance(ch.items, list) else []
         # Ensure items list is in the expected schema
         norm_items = []
         for it in items:
             if not isinstance(it, dict):
                 continue
-            if str(it.get("type") or "video").strip().lower() != "video":
+            u = it.get("url")
+            d = it.get("duration")
+            if not u or not d:
                 continue
-            if is_live_playlist_item(it):
-                continue
-            u = str(it.get("url") or "").strip()
-            if not u:
-                continue
-            d = normalize_duration(it.get("duration"), 60)
-            norm_items.append({"type": "video", "url": u, "duration": d})
+            norm_items.append({"type": "video", "url": str(u).strip(), "duration": int(d)})
         if not norm_items:
-            u = youtube_bypass_url(ch, include_live=False)
+            u = youtube_bypass_url(ch)
             if not u:
                 return None
             norm_items = [{"type": "video", "url": u, "duration": 3600}]
         return {
-            "channel_id": app_channel_id(ch),
+            "channel_id": ch.id,
             "name": ch.name,
             "category": ch.category or "",
             "kind": "youtube_linear",
@@ -695,11 +395,11 @@ def to_app_item(ch: Channel, request: Request) -> Optional[dict]:
         }
 
     if ch.kind == "youtube" or is_youtube(ch.source_url) or is_youtube(ch.playback_url or ""):
-        u = now_url or youtube_bypass_url(ch)
+        u = youtube_bypass_url(ch)
         if not u:
             return None
         return {
-            "channel_id": app_channel_id(ch),
+            "channel_id": ch.id,
             "name": ch.name,
             "category": ch.category or "",
             "kind": "youtube",
@@ -713,11 +413,9 @@ def to_app_item(ch: Channel, request: Request) -> Optional[dict]:
         }
 
     # Default: HLS served by this edge
-    hls_url = direct_ingest_url(ch, request) if uses_direct_ingest(ch) else get_hls_url(ch.id, request)
-    if not hls_url:
-        return None
+    hls_url = get_hls_url(ch.id, request)
     return {
-        "channel_id": app_channel_id(ch),
+        "channel_id": ch.id,
         "name": ch.name,
         "category": ch.category or "",
         "kind": "hls",
@@ -732,22 +430,14 @@ def to_app_item(ch: Channel, request: Request) -> Optional[dict]:
 
 
 def worker_loop():
-    global _last_live_event_check_ts
     while True:
         sync_once()
-        now = time.time()
-        if (now - _last_live_event_check_ts) >= LIVE_EVENT_CHECK_INTERVAL:
-            try:
-                probe_live_items_once()
-            except Exception:
-                pass
-            _last_live_event_check_ts = now
 
         # reiniciar processos que morreram
         for cid, ch in list(last_channels.items()):
             if not ch.enabled:
                 continue
-            if ch.kind == "youtube_linear" or uses_direct_ingest(ch):
+            if ch.kind == "youtube_linear":
                 continue
             p = procs.get(cid)
             if p is None or p.poll() is not None:
@@ -804,23 +494,16 @@ def playlist(request: Request):
         if not ch.enabled:
             continue
         name = ch.name.replace("\n", " ").strip()
-        category = (ch.category or "").replace("\n", " ").replace(chr(34), "").strip()
-        lines.append(f"#EXTINF:-1 group-title=\"{category}\",{name}" if category else f"#EXTINF:-1,{name}")
+        lines.append(f"#EXTINF:-1,{name}")
         # Mixed playlist:
         # - HLS channels: served by this edge at /hls/{EDGE_ID}/{channel_id}/index.m3u8
         # - YouTube channels: pass-through URL (no caching/proxying)
         if ch.kind == "youtube_linear":
-            u = central_now_url(ch) or youtube_bypass_url(ch)
+            u = youtube_bypass_url(ch)
             if u:
                 lines.append(u)
             else:
                 lines.pop()  # remove EXTINF
-        elif uses_direct_ingest(ch):
-            u = direct_ingest_url(ch, request)
-            if u:
-                lines.append(u)
-            else:
-                lines.pop()
         elif ch.kind == "youtube" and (ch.playback_url or ch.source_url):
             lines.append(ch.playback_url or ch.source_url)
         elif ch.kind == "youtube" or is_youtube(ch.source_url) or is_youtube(ch.playback_url or ""):

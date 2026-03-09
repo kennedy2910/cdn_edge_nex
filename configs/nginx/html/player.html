@@ -6,33 +6,66 @@
   <title>NEX Player (teste)</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body{font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:0; background:#0b0b0c; color:#eaeaea;}
-    .wrap{display:grid; grid-template-columns: 320px 1fr; height:100vh;}
-    .side{border-right:1px solid #222; padding:16px; overflow:auto;}
-    .side h2{margin:0 0 12px 0; font-size:18px;}
-    .search{width:100%; padding:10px 12px; border-radius:10px; border:1px solid #333; background:#111; color:#eaeaea;}
-    .list{margin:12px 0 0 0; padding:0; list-style:none;}
-    .item{padding:10px 12px; border:1px solid #222; border-radius:10px; margin-bottom:10px; cursor:pointer; background:#111;}
-    .item:hover{background:#151518}
-    .meta{font-size:12px; color:#aaa; margin-top:4px;}
-    .main{display:flex; flex-direction:column;}
-    .top{padding:12px 16px; border-bottom:1px solid #222; display:flex; align-items:center; justify-content:space-between; gap:12px;}
-    .title{font-size:16px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-    .badge{font-size:12px; color:#aaa}
-    .stage{flex:1; display:flex; align-items:center; justify-content:center; padding:16px;}
-    video, iframe{width:100%; height:100%; max-height: calc(100vh - 70px); background:black; border:0; border-radius:14px;}
-    .empty{color:#aaa; text-align:center; max-width:520px; line-height:1.5}
-    .btn{padding:8px 10px;border:1px solid #333;border-radius:10px;background:#111;color:#eaeaea;cursor:pointer}
-    .btn:hover{background:#151518}
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0b0b0c; color: #eaeaea; }
+    .wrap { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    .side { border-right: 1px solid #222; padding: 16px; overflow: auto; }
+    .side h2 { margin: 0 0 12px; font-size: 18px; }
+    .search { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #333; background: #111; color: #eaeaea; }
+    .list { margin: 12px 0 0; padding: 0; list-style: none; }
+    .item { padding: 10px 12px; border: 1px solid #222; border-radius: 10px; margin-bottom: 10px; cursor: pointer; background: #111; }
+    .item:hover { background: #151518; }
+    .meta { font-size: 12px; color: #aaa; margin-top: 4px; }
+    .main { display: flex; flex-direction: column; }
+    .top { padding: 12px 16px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .title { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { font-size: 12px; color: #aaa; }
+    .stage { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
+    video, iframe { width: 100%; height: 100%; max-height: calc(100vh - 70px); background: black; border: 0; border-radius: 14px; }
+    .empty { color: #aaa; text-align: center; max-width: 520px; line-height: 1.5; }
+    .btn { padding: 8px 10px; border: 1px solid #333; border-radius: 10px; background: #111; color: #eaeaea; cursor: pointer; }
+    .btn:hover { background: #151518; }
+    .banner-ad {
+      position: absolute;
+      top: 28px;
+      right: 28px;
+      z-index: 10;
+      max-width: min(360px, calc(100% - 56px));
+      padding: 14px 16px;
+      border: 1px solid rgba(20, 184, 166, 0.45);
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(20, 184, 166, 0.96), rgba(15, 118, 110, 0.96));
+      color: #ecfeff;
+      box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
+      text-decoration: none;
+      animation: banner-enter 0.24s ease-out;
+    }
+    .banner-ad.is-hidden {
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity 0.28s ease, transform 0.28s ease;
+    }
+    .banner-ad-label { display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.9; margin-bottom: 6px; }
+    .banner-ad-image { display: block; width: 100%; height: 126px; object-fit: cover; border-radius: 12px; margin: 0 0 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.28); }
+    .banner-ad-message { display: block; font-size: 14px; font-weight: 700; line-height: 1.35; }
+    .banner-ad-link { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 700; color: #042f2e; background: rgba(255, 255, 255, 0.88); padding: 6px 10px; border-radius: 999px; }
+    @keyframes banner-enter {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @media (max-width: 900px) {
+      .wrap { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      .side { border-right: 0; border-bottom: 1px solid #222; max-height: 38vh; }
+      .banner-ad { top: 20px; right: 20px; max-width: calc(100% - 40px); }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <aside class="side">
-      <h2>Lista (playlist)</h2>
+      <h2>Lista de canais</h2>
       <input id="q" class="search" placeholder="Buscar canal..." />
       <ul id="list" class="list"></ul>
-      <div class="meta" id="status">Carregando…</div>
+      <div class="meta" id="status">Carregando...</div>
     </aside>
 
     <main class="main">
@@ -42,15 +75,15 @@
           <div id="type" class="badge"></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn" id="reload">Recarregar playlist</button>
-          <a class="btn" href="/" style="text-decoration:none">Início</a>
+          <button class="btn" id="reload">Recarregar lista</button>
+          <a class="btn" href="/" style="text-decoration:none">Inicio</a>
         </div>
       </div>
       <div class="stage" id="stage">
         <div class="empty">
-          Abra <code>/playlist.m3u</code> e verifique se existe pelo menos 1 canal.
+          Abra <code>/channels</code> e verifique se existe pelo menos 1 canal.
           <br>Este player troca automaticamente o motor:
-          <br><b>YouTube</b> → iframe embed • <b>HLS</b> → video + hls.js
+          <br><b>YouTube</b> -> iframe embed • <b>HLS</b> -> video + hls.js
         </div>
       </div>
     </main>
@@ -67,79 +100,211 @@
 
   let channels = [];
   let hls = null;
+  let bannerTimer = null;
+  let bannerHideTimer = null;
+  let bannerEl = null;
+  let currentChannel = null;
 
-  function isYouTube(url){
-    return /youtube\.com|youtu\.be/.test(url);
+  function isYouTube(url) {
+    return /youtube\.com|youtu\.be/.test(url || '');
   }
 
-  function toYouTubeEmbed(url){
-    // accept: https://www.youtube.com/watch?v=ID, https://youtu.be/ID, https://www.youtube.com/live/ID, or already embed
+  function toYouTubeEmbed(url) {
     const m1 = url.match(/[?&]v=([^&]+)/);
     const m2 = url.match(/youtu\.be\/([^?]+)/);
     const m3 = url.match(/youtube\.com\/live\/([^?]+)/);
     const m4 = url.match(/youtube\.com\/embed\/([^?]+)/);
-    const id = (m1&&m1[1]) || (m2&&m2[1]) || (m3&&m3[1]) || (m4&&m4[1]);
-    if(!id) return url;
+    const id = (m1 && m1[1]) || (m2 && m2[1]) || (m3 && m3[1]) || (m4 && m4[1]);
+    if (!id) return url;
     return `https://www.youtube.com/embed/${id}?autoplay=1&mute=0&playsinline=1`;
   }
 
-  function parseM3U(text){
-    const lines = text.split(/\r?\n/);
-    const out = [];
-    let current = null;
-    for(const line of lines){
-      if(line.startsWith('#EXTINF:')){
-        const name = line.split(',').slice(1).join(',').trim();
-        const group = (line.match(/group-title="([^"]+)"/)||[])[1] || '';
-        current = { name, group, url:'' };
-      } else if(line && !line.startsWith('#')){
-        if(current){
-          current.url = line.trim();
-          out.push(current);
-          current = null;
-        }
-      }
-    }
-    return out;
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>\"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   }
 
-  function renderList(filter=''){
+  function getPrimaryUrl(channel) {
+    if (!channel || !Array.isArray(channel.items)) {
+      return '';
+    }
+    const videoItem = channel.items.find((item) => item && item.url);
+    return videoItem && videoItem.url ? String(videoItem.url).trim() : '';
+  }
+
+  function toPlayerChannel(item) {
+    const url = getPrimaryUrl(item);
+    if (!url) {
+      return null;
+    }
+    return {
+      id: String(item.channel_id || item.id || ''),
+      name: String(item.name || item.channel_id || '').trim(),
+      kind: String(item.kind || '').trim().toLowerCase(),
+      url,
+      icon_url: String(item.icon_url || item.icon || item.logo || '').trim(),
+      banner_ads: Array.isArray(item.banner_ads) ? item.banner_ads : [],
+    };
+  }
+
+  function renderList(filter = '') {
     const f = filter.trim().toLowerCase();
     listEl.innerHTML = '';
-    const filtered = channels.filter(c =>
-      !f || c.name.toLowerCase().includes(f) || (c.group||'').toLowerCase().includes(f)
-    );
-    for(const c of filtered){
+    const filtered = channels.filter((c) => !f || c.name.toLowerCase().includes(f) || c.kind.toLowerCase().includes(f));
+    for (const c of filtered) {
       const li = document.createElement('li');
       li.className = 'item';
-      li.innerHTML = `<div><b>${escapeHtml(c.name)}</b></div>` +
-        `<div class="meta">${escapeHtml(c.group || 'sem grupo')} • ${isYouTube(c.url) ? 'YouTube' : 'HLS'}</div>`;
+      li.innerHTML =
+        `<div><b>${escapeHtml(c.name)}</b></div>` +
+        `<div class="meta">${escapeHtml(c.kind || 'canal')} • ${isYouTube(c.url) ? 'YouTube' : 'HLS'}</div>`;
       li.onclick = () => play(c);
       listEl.appendChild(li);
     }
     statusEl.textContent = `${filtered.length} canais (de ${channels.length})`;
   }
 
-  function escapeHtml(s){
-    return (s||'').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  function clearBanner() {
+    if (bannerTimer) {
+      window.clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+    if (bannerHideTimer) {
+      window.clearTimeout(bannerHideTimer);
+      bannerHideTimer = null;
+    }
+    if (bannerEl) {
+      bannerEl.remove();
+      bannerEl = null;
+    }
   }
 
-  function destroyPlayer(){
-    if(hls){ try{ hls.destroy(); }catch(e){}; hls = null; }
+  function getBannerIntervalMs(banner) {
+    const repeatCount = Number(banner.repeat_count_per_day || 1);
+    if (Number.isFinite(repeatCount) && repeatCount > 0) {
+      return (24 * 60 * 60 * 1000) / repeatCount;
+    }
+    const intervalMinutes = Number(banner.interval_minutes || 1440);
+    return Math.max(60000, intervalMinutes * 60 * 1000);
+  }
+
+  function getBannerStartOffsetMs(banner) {
+    const raw = String(banner.start_time || '00:00').trim();
+    const match = raw.match(/^(\d{2}):(\d{2})$/);
+    if (!match) return 0;
+    const hh = Math.max(0, Math.min(23, Number(match[1]) || 0));
+    const mm = Math.max(0, Math.min(59, Number(match[2]) || 0));
+    return ((hh * 60) + mm) * 60 * 1000;
+  }
+
+  function getBannerOccurrence(banner, nowMs) {
+    const intervalMs = Math.max(60000, getBannerIntervalMs(banner));
+    const durationMs = Math.max(1000, Number(banner.duration || 5) * 1000);
+    const dayStart = new Date(nowMs);
+    dayStart.setHours(0, 0, 0, 0);
+
+    const firstStartMs = dayStart.getTime() + getBannerStartOffsetMs(banner);
+    let currentStartMs = firstStartMs;
+    if (nowMs >= firstStartMs) {
+      const cycles = Math.floor((nowMs - firstStartMs) / intervalMs);
+      currentStartMs = firstStartMs + cycles * intervalMs;
+    } else {
+      const cyclesBack = Math.ceil((firstStartMs - nowMs) / intervalMs);
+      currentStartMs = firstStartMs - cyclesBack * intervalMs;
+    }
+
+    const elapsedMs = nowMs - currentStartMs;
+    const isActiveWindow = elapsedMs >= 0 && elapsedMs < durationMs;
+    const remainingMs = isActiveWindow ? durationMs - elapsedMs : 0;
+    const nextStartMs = isActiveWindow
+      ? currentStartMs + intervalMs
+      : (elapsedMs < 0 ? currentStartMs : currentStartMs + intervalMs);
+
+    return {
+      isActiveWindow,
+      remainingMs,
+      waitUntilNextStartMs: Math.max(250, nextStartMs - nowMs),
+    };
+  }
+
+  function renderBanner(channel, banner) {
+    clearBanner();
+    const href = String(banner.target_url || banner.url || '').trim();
+    const imageUrl = String(banner.image_url || '').trim();
+    const message = String(banner.message || '').trim();
+    const imageOnly = Boolean(imageUrl) && !message;
+    const el = document.createElement(href ? 'a' : 'div');
+    el.className = 'banner-ad';
+    if (imageOnly) {
+      el.style.padding = '0';
+      el.style.background = 'transparent';
+      el.style.border = '0';
+      el.style.boxShadow = '0 18px 32px rgba(0, 0, 0, 0.24)';
+    }
+    if (href) {
+      el.href = href;
+      el.target = '_blank';
+      el.rel = 'noopener noreferrer';
+    }
+    el.innerHTML =
+      (imageOnly ? '' : `<span class="banner-ad-label">Banner ADS</span>`) +
+      (imageUrl ? `<img class="banner-ad-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(message || 'Banner ADS')}">` : '') +
+      (imageOnly ? '' : `<span class="banner-ad-message">${escapeHtml(message || 'Publicidade')}</span>`) +
+      (href && !imageOnly ? `<span class="banner-ad-link">Abrir link</span>` : '');
+    stage.appendChild(el);
+    bannerEl = el;
+  }
+
+  function scheduleBanner(channel) {
+    clearBanner();
+    const banner = Array.isArray(channel.banner_ads) ? channel.banner_ads[0] : null;
+    if (!banner || (!banner.message && !banner.image_url)) {
+      return;
+    }
+
+    const schedule = getBannerOccurrence(banner, Date.now());
+    if (schedule.isActiveWindow) {
+      renderBanner(channel, banner);
+      bannerTimer = window.setTimeout(() => {
+        if (!bannerEl) return;
+        bannerEl.classList.add('is-hidden');
+        bannerHideTimer = window.setTimeout(() => {
+          clearBanner();
+          if (currentChannel && currentChannel.id === channel.id) {
+            scheduleBanner(channel);
+          }
+        }, 320);
+      }, schedule.remainingMs);
+      return;
+    }
+
+    bannerTimer = window.setTimeout(() => {
+      if (currentChannel && currentChannel.id === channel.id) {
+        scheduleBanner(channel);
+      }
+    }, schedule.waitUntilNextStartMs);
+  }
+
+  function destroyPlayer() {
+    clearBanner();
+    if (hls) {
+      try { hls.destroy(); } catch (e) {}
+      hls = null;
+    }
     stage.innerHTML = '';
   }
 
-  function play(c){
+  function play(c) {
     destroyPlayer();
+    currentChannel = c;
     nowEl.textContent = c.name;
 
-    if(isYouTube(c.url)){
+    if (isYouTube(c.url)) {
       typeEl.textContent = 'YouTube (iframe)';
       const iframe = document.createElement('iframe');
       iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
       iframe.allowFullscreen = true;
       iframe.src = toYouTubeEmbed(c.url);
       stage.appendChild(iframe);
+      scheduleBanner(c);
       return;
     }
 
@@ -149,15 +314,15 @@
     video.autoplay = true;
     video.playsInline = true;
 
-    if(video.canPlayType('application/vnd.apple.mpegurl')){
-      // Safari / iOS nativo
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = c.url;
       stage.appendChild(video);
-      video.play().catch(()=>{});
+      video.play().catch(() => {});
+      scheduleBanner(c);
       return;
     }
 
-    if(window.Hls && window.Hls.isSupported()){
+    if (window.Hls && window.Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -165,32 +330,33 @@
       hls.loadSource(c.url);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(()=>{});
+        video.play().catch(() => {});
       });
       stage.appendChild(video);
+      scheduleBanner(c);
       return;
     }
 
-    stage.innerHTML = `<div class="empty">Seu navegador não suporta HLS. Teste em Chrome/Edge/Firefox com hls.js.</div>`;
+    stage.innerHTML = '<div class="empty">Seu navegador não suporta HLS. Teste em Chrome/Edge/Firefox com hls.js.</div>';
   }
 
-  async function loadPlaylist(){
-    statusEl.textContent = 'Carregando…';
-    try{
-      const res = await fetch('/playlist.m3u', { cache: 'no-store' });
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      channels = parseM3U(text);
+  async function loadChannels() {
+    statusEl.textContent = 'Carregando...';
+    try {
+      const res = await fetch('/channels', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json();
+      channels = Array.isArray(payload) ? payload.map(toPlayerChannel).filter(Boolean) : [];
       renderList(qEl.value);
-    } catch (e){
-      statusEl.textContent = `Erro ao carregar playlist: ${e.message}`;
+    } catch (e) {
+      statusEl.textContent = `Erro ao carregar canais: ${e.message}`;
     }
   }
 
   qEl.addEventListener('input', () => renderList(qEl.value));
-  reloadBtn.addEventListener('click', loadPlaylist);
+  reloadBtn.addEventListener('click', loadChannels);
 
-  loadPlaylist();
+  loadChannels();
 </script>
 </body>
 </html>
